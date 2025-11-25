@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pose Estimation Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+        
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto;
+        }
+        
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-start {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-start:hover:not(:disabled) {
+            background: #059669;
+        }
+        
+        .btn-stop {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-stop:hover:not(:disabled) {
+            background: #dc2626;
+        }
+        
+        .btn-export {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .btn-export:hover:not(:disabled) {
+            background: #2563eb;
+        }
+        
+        .btn-clear {
+            background: #6b7280;
+            color: white;
+        }
+        
+        .btn-clear:hover:not(:disabled) {
+            background: #4b5563;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 6px;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-bottom: 5px;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: #10b981;
+        }
+        
+        .status {
+            padding: 12px;
+            background: #2a2a2a;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        
+        .status.recording {
+            background: #7f1d1d;
+            border-left: 4px solid #ef4444;
+        }
+        
+        .status.ready {
+            background: #064e3b;
+            border-left: 4px solid #10b981;
+        }
+        
+        .info {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 6px;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #9ca3af;
+        }
+        
+        .info ul {
+            margin-left: 20px;
+            margin-top: 10px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #9ca3af;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📹 Pose Estimation Tracker</h1>
+        
+        <div class="status" id="status">
+            Initializing camera and pose detector...
+        </div>
+        
+        <div class="video-container">
+            <div class="video-wrapper">
+                <video id="video" autoplay playsinline></video>
+                <canvas id="canvas"></canvas>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="startBtn" class="btn-start" disabled>Start Recording</button>
+            <button id="stopBtn" class="btn-stop" disabled>Stop Recording</button>
+            <button id="exportJsonBtn" class="btn-export" disabled>Export JSON</button>
+            <button id="exportCsvBtn" class="btn-export" disabled>Export CSV</button>
+            <button id="exportVideoBtn" class="btn-export" disabled>Export Video</button>
+            <button id="clearBtn" class="btn-clear" disabled>Clear Data</button>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-label">Frames Recorded</div>
+                <div class="stat-value" id="frameCount">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Duration</div>
+                <div class="stat-value" id="duration">0.0s</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">FPS</div>
+                <div class="stat-value" id="fps">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Pose Data Size</div>
+                <div class="stat-value" id="dataSize">0 KB</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Video Size</div>
+                <div class="stat-value" id="videoSize">0 KB</div>
+            </div>
+        </div>
+        
+        <div class="info">
+            <strong>How to use:</strong>
+            <ul>
+                <li>Allow camera access when prompted</li>
+                <li>Click "Start Recording" to begin capturing pose data and video simultaneously</li>
+                <li>Click "Stop Recording" when finished</li>
+                <li>Export pose data as JSON (structured) or CSV (spreadsheet-compatible)</li>
+                <li>Export video as WebM file for synchronization with pose data</li>
+                <li>Keep the tab active and screen on during recording</li>
+            </ul>
+            <br>
+            <strong>Data synchronization:</strong> Pose data timestamps match video timeline. Use the relativeTime field in JSON/CSV to sync with video playback.
+            <br><br>
+            <strong>Data format:</strong> Each frame contains 33 landmarks with x, y, z coordinates and visibility scores, plus timestamp.
+        </div>
+    </div>
+
+    <script>
+        // State management
+        let pose = null;
+        let camera = null;
+        let isRecording = false;
+        let recordedData = [];
+        let startTime = null;
+        let frameCount = 0;
+        let lastFrameTime = Date.now();
+        let fpsHistory = [];
+        
+        // Video recording state
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let videoStream = null;
+        
+        // DOM elements
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const canvasCtx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const exportJsonBtn = document.getElementById('exportJsonBtn');
+        const exportCsvBtn = document.getElementById('exportCsvBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        
+        // Initialize MediaPipe Pose
+        async function initializePose() {
+            try {
+                pose = new Pose({
+                    locateFile: (file) => {
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+                    }
+                });
+                
+                pose.setOptions({
+                    modelComplexity: 1,
+                    smoothLandmarks: true,
+                    enableSegmentation: false,
+                    smoothSegmentation: false,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+                
+                pose.onResults(onResults);
+                
+                // Initialize camera
+                camera = new Camera(video, {
+                    onFrame: async () => {
+                        await pose.send({image: video});
+                    },
+                    width: 640,
+                    height: 480
+                });
+                
+                await camera.start();
+                
+                // Get video stream for recording
+                videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480 },
+                    audio: false
+                });
+                
+                updateStatus('Ready to record', 'ready');
+                startBtn.disabled = false;
+                
+            } catch (error) {
+                console.error('Initialization error:', error);
+                updateStatus('Error: ' + error.message, 'error');
+            }
+        }
+        
+        function onResults(results) {
+            // Resize canvas to match video
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            // Draw video frame
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+            
+            // Draw pose landmarks
+            if (results.poseLandmarks) {
+                drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS,
+                    {color: '#00FF00', lineWidth: 2});
+                drawLandmarks(canvasCtx, results.poseLandmarks,
+                    {color: '#FF0000', lineWidth: 1, radius: 3});
+                
+                // Record data if recording is active
+                if (isRecording) {
+                    const currentTime = Date.now();
+                    const relativeTime = (currentTime - startTime) / 1000; // seconds
+                    
+                    const frameData = {
+                        timestamp: currentTime,
+                        relativeTime: relativeTime,
+                        landmarks: results.poseLandmarks.map((landmark, index) => ({
+                            index: index,
+                            x: landmark.x,
+                            y: landmark.y,
+                            z: landmark.z,
+                            visibility: landmark.visibility
+                        }))
+                    };
+                    
+                    recordedData.push(frameData);
+                    frameCount++;
+                    
+                    // Calculate FPS
+                    const fps = 1000 / (currentTime - lastFrameTime);
+                    fpsHistory.push(fps);
+                    if (fpsHistory.length > 30) fpsHistory.shift();
+                    lastFrameTime = currentTime;
+                    
+                    updateStats();
+                }
+            }
+            
+            canvasCtx.restore();
+        }
+        
+        function updateStatus(message, className = '') {
+            statusDiv.textContent = message;
+            statusDiv.className = 'status ' + className;
+        }
+        
+        function updateStats() {
+            document.getElementById('frameCount').textContent = frameCount;
+            
+            if (startTime) {
+                const duration = (Date.now() - startTime) / 1000;
+                document.getElementById('duration').textContent = duration.toFixed(1) + 's';
+            }
+            
+            if (fpsHistory.length > 0) {
+                const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+                document.getElementById('fps').textContent = Math.round(avgFps);
+            }
+            
+            // Estimate pose data size
+            const jsonSize = JSON.stringify(recordedData).length;
+            const sizeKB = (jsonSize / 1024).toFixed(1);
+            document.getElementById('dataSize').textContent = sizeKB + ' KB';
+            
+            // Estimate video size
+            const videoBytes = recordedChunks.reduce((acc, chunk) => acc + chunk.size, 0);
+            const videoSizeKB = (videoBytes / 1024).toFixed(1);
+            document.getElementById('videoSize').textContent = videoSizeKB + ' KB';
+        }
+        
+        function startRecording() {
+            isRecording = true;
+            startTime = Date.now();
+            frameCount = 0;
+            recordedData = [];
+            fpsHistory = [];
+            lastFrameTime = Date.now();
+            recordedChunks = [];
+            
+            // Start video recording
+            try {
+                const options = { mimeType: 'video/webm;codecs=vp9' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options.mimeType = 'video/webm;codecs=vp8';
+                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                        options.mimeType = 'video/webm';
+                    }
+                }
+                
+                mediaRecorder = new MediaRecorder(videoStream, options);
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.start(100); // Collect data every 100ms
+                
+            } catch (error) {
+                console.error('Video recording error:', error);
+                alert('Warning: Video recording failed. Pose data will still be recorded.');
+            }
+            
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            exportJsonBtn.disabled = true;
+            exportCsvBtn.disabled = true;
+            exportVideoBtn.disabled = true;
+            clearBtn.disabled = true;
+            
+            updateStatus('🔴 Recording pose data and video...', 'recording');
+        }
+        
+        function stopRecording() {
+            isRecording = false;
+            
+            // Stop video recording
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            exportJsonBtn.disabled = recordedData.length === 0;
+            exportCsvBtn.disabled = recordedData.length === 0;
+            exportVideoBtn.disabled = recordedChunks.length === 0;
+            clearBtn.disabled = recordedData.length === 0 && recordedChunks.length === 0;
+            
+            updateStatus(`Recording stopped. ${frameCount} frames captured.`, 'ready');
+        }
+        
+        function exportJSON() {
+            const exportData = {
+                metadata: {
+                    recordingDate: new Date(startTime).toISOString(),
+                    totalFrames: recordedData.length,
+                    duration: recordedData.length > 0 ? 
+                        (recordedData[recordedData.length - 1].relativeTime).toFixed(2) : 0,
+                    averageFPS: fpsHistory.length > 0 ? 
+                        Math.round(fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length) : 0
+                },
+                frames: recordedData
+            };
+            
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], 
+                { type: 'application/json' });
+            downloadFile(blob, `pose_data_${Date.now()}.json`);
+        }
+        
+        function exportCSV() {
+            // CSV Header
+            let csv = 'frame,timestamp,relativeTime,';
+            for (let i = 0; i < 33; i++) {
+                csv += `landmark${i}_x,landmark${i}_y,landmark${i}_z,landmark${i}_visibility,`;
+            }
+            csv = csv.slice(0, -1) + '\n'; // Remove last comma and add newline
+            
+            // CSV Data
+            recordedData.forEach((frame, frameIndex) => {
+                let row = `${frameIndex},${frame.timestamp},${frame.relativeTime},`;
+                frame.landmarks.forEach(landmark => {
+                    row += `${landmark.x},${landmark.y},${landmark.z},${landmark.visibility},`;
+                });
+                row = row.slice(0, -1) + '\n';
+                csv += row;
+            });
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            downloadFile(blob, `pose_data_${Date.now()}.csv`);
+        }
+        
+        function exportVideo() {
+            if (recordedChunks.length === 0) {
+                alert('No video data available. Make sure recording completed successfully.');
+                return;
+            }
+            
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            downloadFile(blob, `pose_video_${Date.now()}.webm`);
+        }
+        
+        function downloadFile(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        function clearData() {
+            if (confirm('Are you sure you want to clear all recorded data and video?')) {
+                recordedData = [];
+                recordedChunks = [];
+                frameCount = 0;
+                startTime = null;
+                fpsHistory = [];
+                
+                updateStats();
+                exportJsonBtn.disabled = true;
+                exportCsvBtn.disabled = true;
+                exportVideoBtn.disabled = true;
+                clearBtn.disabled = true;
+                
+                updateStatus('Data cleared. Ready to record.', 'ready');
+            }
+        }
+        
+        // DOM elements for new button
+        const exportVideoBtn = document.getElementById('exportVideoBtn');
+        
+        // Event listeners
+        startBtn.addEventListener('click', startRecording);
+        stopBtn.addEventListener('click', stopRecording);
+        exportJsonBtn.addEventListener('click', exportJSON);
+        exportCsvBtn.addEventListener('click', exportCSV);
+        exportVideoBtn.addEventListener('click', exportVideo);
+        clearBtn.addEventListener('click', clearData);
+        
+        // Initialize on load
+        initializePose();
+    </script>
+</body>
+</html>
